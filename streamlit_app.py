@@ -1,18 +1,17 @@
 import os
+import tempfile
 from PIL import Image
+import streamlit as st
 import cv2
 
 def validate_profile_photo(filepath, allowed_formats=('JPEG', 'PNG'), min_size=(300, 300), max_filesize_mb=5):
-    # Check file existence
     if not os.path.exists(filepath):
         return False, "❌ File does not exist."
 
-    # Check file size
     filesize_mb = os.path.getsize(filepath) / (1024 * 1024)
     if filesize_mb > max_filesize_mb:
         return False, f"❌ File is too large: {filesize_mb:.2f} MB (max {max_filesize_mb} MB)."
 
-    # Validate image format and dimensions
     try:
         with Image.open(filepath) as img:
             if img.format.upper() not in allowed_formats:
@@ -24,40 +23,54 @@ def validate_profile_photo(filepath, allowed_formats=('JPEG', 'PNG'), min_size=(
 
     return True, "✅ Image is valid."
 
-
-def contains_face(filepath):
+def contains_exactly_one_face(filepath):
     try:
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         img = cv2.imread(filepath)
         if img is None:
-            return False
+            return False, "❌ Failed to load image for face detection."
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-        return len(faces) > 0
+
+        if len(faces) == 0:
+            return False, "❌ No face detected in the image."
+        elif len(faces) > 1:
+            return False, f"❌ Multiple faces detected ({len(faces)}). Only one face is allowed."
+        else:
+            return True, "✅ Exactly one face detected."
     except Exception as e:
-        print(f"Error in face detection: {e}")
-        return False
+        return False, f"❌ Face detection error: {str(e)}"
 
-
-def validate_profile_photo_with_face(filepath):
+def validate_profile_photo_with_single_face(filepath):
     valid, msg = validate_profile_photo(filepath)
     if not valid:
-        return valid, msg
+        return False, msg
 
-    if not contains_face(filepath):
-        return False, "❌ No face detected in the image."
+    face_valid, face_msg = contains_exactly_one_face(filepath)
+    if not face_valid:
+        return False, face_msg
 
-    return True, "✅ Image is valid and contains a face."
+    return True, "✅ Image is valid and contains exactly one face."
 
 
-# ====== 🧪 Test the validator ======
-if __name__ == "__main__":
-    filepath = input("Enter the path to the profile photo: ").strip()
+# ==== Streamlit App ====
 
-    # With face detection
-    valid, message = validate_profile_photo_with_face(filepath)
+st.title("📸 Profile Photo Validator")
 
-    # If you only want basic validation without face detection:
-    # valid, message = validate_profile_photo(filepath)
+uploaded_file = st.file_uploader("Upload a profile photo (JPEG/PNG)", type=["jpg", "jpeg", "png"])
 
-    print(message)
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
+
+    # Show uploaded image
+    st.image(tmp_path, caption="Uploaded Image", use_column_width=True)
+
+    # Validate photo
+    valid, message = validate_profile_photo_with_single_face(tmp_path)
+    if valid:
+        st.success(message)
+    else:
+        st.error(message)
